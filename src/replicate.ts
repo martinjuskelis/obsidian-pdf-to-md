@@ -131,6 +131,13 @@ export async function convertWithReplicate(
 				throw new Error("Replicate: prediction succeeded but output is null.");
 			}
 
+			if ((out as any).success === false) {
+				throw new Error(
+					`Marker conversion failed. Keys: ${Object.keys(out).join(", ")}. ` +
+					`Raw: ${JSON.stringify(out).slice(0, 500)}`
+				);
+			}
+
 			// Handle various possible output shapes
 			const markdown =
 				(out as any).output ??
