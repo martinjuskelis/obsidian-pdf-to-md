@@ -116,8 +116,10 @@ export async function convertWithReplicate(
 		const current: ReplicatePrediction = pollResp.json;
 
 		if (current.status === "failed" || current.status === "canceled") {
+			const logs = (current as any).logs || "";
+			const lastLog = logs.split("\n").filter(Boolean).slice(-3).join(" | ");
 			throw new Error(
-				`Replicate: prediction ${current.status} — ${current.error || "unknown error"}`
+				`Replicate: prediction ${current.status} — ${current.error || "unknown error"}${lastLog ? ` — Logs: ${lastLog}` : ""}`
 			);
 		}
 
