@@ -125,7 +125,9 @@ export async function convertWithReplicate(
 
 		if (current.status === "succeeded") {
 			const out = current.output;
-			console.log("pdf-to-md: Replicate output:", JSON.stringify(out).slice(0, 2000));
+			if (settings.debug) {
+				console.log("pdf-to-md: Replicate output:", JSON.stringify(out).slice(0, 2000));
+			}
 
 			if (!out) {
 				throw new Error("Replicate: prediction succeeded but output is null.");

@@ -23,6 +23,7 @@ export interface PdfToMdSettings {
 	formatLines: boolean;
 	disableImageExtraction: boolean;
 	pageRange: string;
+	debug: boolean;
 }
 
 export const DEFAULT_SETTINGS: PdfToMdSettings = {
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: PdfToMdSettings = {
 	formatLines: false,
 	disableImageExtraction: false,
 	pageRange: "",
+	debug: false,
 };
 
 export class PdfToMdSettingTab extends PluginSettingTab {
@@ -230,6 +232,20 @@ export class PdfToMdSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.disableImageExtraction)
 					.onChange(async (value) => {
 						this.plugin.settings.disableImageExtraction = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("h3", { text: "Advanced" });
+
+		new Setting(containerEl)
+			.setName("Debug logging")
+			.setDesc("Log API responses to the developer console.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.debug)
+					.onChange(async (value) => {
+						this.plugin.settings.debug = value;
 						await this.plugin.saveSettings();
 					})
 			);
