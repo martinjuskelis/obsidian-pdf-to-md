@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: PdfToMdSettings = {
 	forceOcr: false,
 	useLlm: true,
 	paginateOutput: false,
-	stripExistingOcr: true,
+	stripExistingOcr: false,
 	formatLines: false,
 	disableImageExtraction: false,
 	pageRange: "",
