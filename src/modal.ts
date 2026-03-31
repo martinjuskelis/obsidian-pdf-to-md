@@ -72,6 +72,7 @@ export async function convertWithModal(
 	return {
 		markdown: data.output || data.markdown || "",
 		images: data.images || {},
+		elapsedSeconds: data.elapsed_seconds,
 	};
 }
 

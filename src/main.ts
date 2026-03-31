@@ -10,6 +10,7 @@ import { convertWithModal } from "./modal";
 export interface ConversionResult {
 	markdown: string;
 	images: Record<string, string>; // filename → base64 or URL
+	elapsedSeconds?: number;
 }
 
 export default class PdfToMdPlugin extends Plugin {
@@ -101,8 +102,11 @@ export default class PdfToMdPlugin extends Plugin {
 			await this.saveResult(file, result);
 
 			progressNotice.hide();
+			const elapsed = result.elapsedSeconds
+				? ` (${result.elapsedSeconds}s)`
+				: "";
 			new Notice(
-				`Converted ${file.name} to Markdown.`,
+				`Converted ${file.name} to Markdown.${elapsed}`,
 				5000
 			);
 		} catch (err) {
