@@ -143,7 +143,18 @@ export async function convertWithReplicate(
 				(out as any).output ??
 				(out as any).markdown ??
 				(typeof out === "string" ? out : "");
-			const images = (out as any).images ?? {};
+
+			// Images can be: array of URLs, or object { filename: base64/url }
+			let images: Record<string, string> = {};
+			const rawImages = (out as any).images;
+			if (Array.isArray(rawImages)) {
+				for (const url of rawImages) {
+					const filename = url.split("/").pop() || url;
+					images[filename] = url;
+				}
+			} else if (rawImages && typeof rawImages === "object") {
+				images = rawImages;
+			}
 
 			if (!markdown) {
 				throw new Error(

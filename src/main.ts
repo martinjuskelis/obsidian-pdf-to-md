@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, TFolder } from "obsidian";
+import { Notice, Plugin, TFile, TFolder, requestUrl } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
 	PdfToMdSettingTab,
@@ -9,7 +9,7 @@ import { convertWithModal } from "./modal";
 
 export interface ConversionResult {
 	markdown: string;
-	images: Record<string, string>; // filename → base64
+	images: Record<string, string>; // filename → base64 or URL
 }
 
 export default class PdfToMdPlugin extends Plugin {
@@ -134,10 +134,19 @@ export default class PdfToMdPlugin extends Plugin {
 			await this.ensureFolder(imageDir);
 
 			for (const imgName of imageNames) {
-				const imgBase64 = result.images[imgName];
-				const imgBytes = base64ToArrayBuffer(imgBase64);
-				const imgPath = joinPath(imageDir, imgName);
+				const imgValue = result.images[imgName];
+				let imgBytes: ArrayBuffer;
 
+				if (imgValue.startsWith("http://") || imgValue.startsWith("https://")) {
+					// Download image from URL
+					const resp = await requestUrl({ url: imgValue, method: "GET" });
+					imgBytes = resp.arrayBuffer;
+				} else {
+					// Decode base64
+					imgBytes = base64ToArrayBuffer(imgValue);
+				}
+
+				const imgPath = joinPath(imageDir, imgName);
 				const existing =
 					this.app.vault.getAbstractFileByPath(imgPath);
 				if (existing instanceof TFile) {
