@@ -122,15 +122,27 @@ export async function convertWithReplicate(
 		}
 
 		if (current.status === "succeeded") {
-			if (!current.output || !current.output.success) {
+			const out = current.output;
+			console.log("pdf-to-md: Replicate output:", JSON.stringify(out).slice(0, 2000));
+
+			if (!out) {
+				throw new Error("Replicate: prediction succeeded but output is null.");
+			}
+
+			// Handle various possible output shapes
+			const markdown =
+				(out as any).output ??
+				(out as any).markdown ??
+				(typeof out === "string" ? out : "");
+			const images = (out as any).images ?? {};
+
+			if (!markdown) {
 				throw new Error(
-					"Replicate: Marker returned success=false. The PDF may be unsupported."
+					`Replicate: no markdown in output. Keys: ${Object.keys(out).join(", ")}`
 				);
 			}
-			return {
-				markdown: current.output.output,
-				images: current.output.images || {},
-			};
+
+			return { markdown, images };
 		}
 	}
 }
