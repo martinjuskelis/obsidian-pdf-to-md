@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: PdfToMdSettings = {
 	disableImageExtraction: false,
 	pageRange: "",
 	debug: false,
-	concurrency: 3,
+	concurrency: 5,
 	skipExisting: true,
 };
 

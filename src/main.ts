@@ -88,24 +88,52 @@ export default class PdfToMdPlugin extends Plugin {
 	private async convertOne(file: TFile): Promise<void> {
 		const signal = { cancelled: false };
 		const pdfBuffer = await this.app.vault.readBinary(file);
+		const maxRetries = 3;
 
-		let result: ConversionResult;
-		if (this.settings.provider === "replicate") {
-			result = await convertWithReplicate(
-				pdfBuffer,
-				this.settings,
-				() => {},
-				signal
-			);
-		} else {
-			result = await convertWithModal(
-				pdfBuffer,
-				this.settings,
-				() => {}
-			);
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				let result: ConversionResult;
+				if (this.settings.provider === "replicate") {
+					result = await convertWithReplicate(
+						pdfBuffer,
+						this.settings,
+						() => {},
+						signal
+					);
+				} else {
+					result = await convertWithModal(
+						pdfBuffer,
+						this.settings,
+						() => {}
+					);
+				}
+
+				await this.saveResult(file, result);
+				return;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				const isTransient =
+					msg.includes("429") ||
+					msg.includes("500") ||
+					msg.includes("502") ||
+					msg.includes("503") ||
+					msg.includes("504") ||
+					msg.includes("timeout") ||
+					msg.includes("ETIMEDOUT") ||
+					msg.includes("ECONNRESET") ||
+					msg.includes("network");
+
+				if (isTransient && attempt < maxRetries) {
+					const delay = attempt * 5000; // 5s, 10s
+					console.log(
+						`pdf-to-md: retrying ${file.name} (attempt ${attempt + 1}/${maxRetries}) in ${delay / 1000}s`
+					);
+					await sleep(delay);
+					continue;
+				}
+				throw err;
+			}
 		}
-
-		await this.saveResult(file, result);
 	}
 
 	private enqueue(files: TFile[]) {
@@ -305,4 +333,8 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 		bytes[i] = raw.charCodeAt(i);
 	}
 	return bytes.buffer;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
