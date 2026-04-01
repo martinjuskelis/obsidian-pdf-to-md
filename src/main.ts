@@ -76,11 +76,16 @@ export default class PdfToMdPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	// ------- Conversion -------
+	// ------- Conversion queue -------
 
-	private activeJobs = 0;
+	private queue: TFile[] = [];
+	private running = 0;
+	private batchTotal = 0;
+	private batchDone = 0;
+	private batchFailed = 0;
+	private batchNotice: Notice | null = null;
 
-	private async convertOne(file: TFile): Promise<boolean> {
+	private async convertOne(file: TFile): Promise<void> {
 		const signal = { cancelled: false };
 		const pdfBuffer = await this.app.vault.readBinary(file);
 
@@ -101,38 +106,93 @@ export default class PdfToMdPlugin extends Plugin {
 		}
 
 		await this.saveResult(file, result);
-		return true;
 	}
 
-	private async convertPdf(file: TFile) {
-		if (this.activeJobs > 0) {
-			new Notice("A conversion is already in progress.");
-			return;
+	private enqueue(files: TFile[]) {
+		for (const f of files) {
+			if (!this.queue.includes(f)) {
+				this.queue.push(f);
+				this.batchTotal++;
+			}
 		}
-		this.activeJobs = 1;
-		const notice = new Notice(`Converting ${file.name}...`, 0);
+		this.updateNotice();
+		this.drain();
+	}
 
+	private drain() {
+		const concurrency = this.settings.concurrency;
+		while (this.running < concurrency && this.queue.length > 0) {
+			const file = this.queue.shift()!;
+			this.running++;
+			this.processFile(file);
+		}
+	}
+
+	private async processFile(file: TFile) {
 		try {
 			await this.convertOne(file);
-			notice.hide();
-			new Notice(`Converted ${file.name} to Markdown.`, 5000);
+			this.batchDone++;
+			new Notice(`Converted ${file.name}`, 3000);
 		} catch (err) {
-			notice.hide();
+			this.batchFailed++;
 			const msg = err instanceof Error ? err.message : String(err);
-			new Notice(`Failed: ${msg}`, 8000);
-			console.error("pdf-to-md: conversion error", err);
+			new Notice(`Failed ${file.name}: ${msg}`, 6000);
+			console.error(`pdf-to-md: failed ${file.path}`, err);
 		} finally {
-			this.activeJobs = 0;
+			this.running--;
+			this.updateNotice();
+			if (this.queue.length > 0) {
+				this.drain();
+			} else if (this.running === 0) {
+				this.finishBatch();
+			}
 		}
 	}
 
-	private async convertFolder(folder: TFolder) {
-		if (this.activeJobs > 0) {
-			new Notice("A conversion is already in progress.");
-			return;
+	private updateNotice() {
+		if (this.batchTotal <= 1) return; // single file — no progress bar needed
+		if (!this.batchNotice) {
+			this.batchNotice = new Notice("", 0);
 		}
+		const queued = this.queue.length;
+		this.batchNotice.setMessage(
+			`PDF conversion: ${this.batchDone}/${this.batchTotal} done, ` +
+				`${this.running} active` +
+				(queued > 0 ? `, ${queued} queued` : "") +
+				(this.batchFailed > 0 ? `, ${this.batchFailed} failed` : "")
+		);
+	}
 
-		// Collect PDFs in this folder (non-recursive)
+	private finishBatch() {
+		if (this.batchNotice) {
+			this.batchNotice.hide();
+			this.batchNotice = null;
+		}
+		if (this.batchTotal > 1) {
+			new Notice(
+				`Batch complete: ${this.batchDone}/${this.batchTotal} converted` +
+					(this.batchFailed > 0
+						? `, ${this.batchFailed} failed`
+						: ""),
+				8000
+			);
+		}
+		this.batchTotal = 0;
+		this.batchDone = 0;
+		this.batchFailed = 0;
+	}
+
+	private convertPdf(file: TFile) {
+		if (this.batchTotal === 0) {
+			// Starting fresh
+			this.batchTotal = 0;
+			this.batchDone = 0;
+			this.batchFailed = 0;
+		}
+		this.enqueue([file]);
+	}
+
+	private convertFolder(folder: TFolder) {
 		let pdfs = folder.children.filter(
 			(f): f is TFile => f instanceof TFile && f.extension === "pdf"
 		);
@@ -152,55 +212,7 @@ export default class PdfToMdPlugin extends Plugin {
 			return;
 		}
 
-		const total = pdfs.length;
-		let completed = 0;
-		let failed = 0;
-		const concurrency = this.settings.concurrency;
-		const notice = new Notice(
-			`Converting 0/${total} PDFs (${concurrency} parallel)...`,
-			0
-		);
-
-		this.activeJobs = total;
-
-		const update = () => {
-			notice.setMessage(
-				`Converting PDFs: ${completed}/${total} done` +
-					(failed > 0 ? `, ${failed} failed` : "") +
-					` (${concurrency} parallel)`
-			);
-		};
-
-		// Process with concurrency limit
-		const queue = [...pdfs];
-		const workers = Array.from(
-			{ length: Math.min(concurrency, queue.length) },
-			async () => {
-				while (queue.length > 0) {
-					const file = queue.shift()!;
-					try {
-						await this.convertOne(file);
-						completed++;
-					} catch (err) {
-						failed++;
-						console.error(
-							`pdf-to-md: failed to convert ${file.path}`,
-							err
-						);
-					}
-					update();
-				}
-			}
-		);
-
-		await Promise.all(workers);
-		this.activeJobs = 0;
-		notice.hide();
-		new Notice(
-			`Batch complete: ${completed}/${total} converted` +
-				(failed > 0 ? `, ${failed} failed` : ""),
-			8000
-		);
+		this.enqueue(pdfs);
 	}
 
 	// ------- File saving -------
