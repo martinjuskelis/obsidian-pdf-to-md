@@ -79,6 +79,7 @@ export default class PdfToMdPlugin extends Plugin {
 	// ------- Conversion queue -------
 
 	private queue: TFile[] = [];
+	private active: Set<string> = new Set();
 	private running = 0;
 	private batchTotal = 0;
 	private batchDone = 0;
@@ -138,7 +139,7 @@ export default class PdfToMdPlugin extends Plugin {
 
 	private enqueue(files: TFile[]) {
 		for (const f of files) {
-			if (!this.queue.includes(f)) {
+			if (!this.queue.includes(f) && !this.active.has(f.path)) {
 				this.queue.push(f);
 				this.batchTotal++;
 			}
@@ -157,6 +158,7 @@ export default class PdfToMdPlugin extends Plugin {
 	}
 
 	private async processFile(file: TFile) {
+		this.active.add(file.path);
 		try {
 			await this.convertOne(file);
 			this.batchDone++;
@@ -167,6 +169,7 @@ export default class PdfToMdPlugin extends Plugin {
 			new Notice(`Failed ${file.name}: ${msg}`, 6000);
 			console.error(`pdf-to-md: failed ${file.path}`, err);
 		} finally {
+			this.active.delete(file.path);
 			this.running--;
 			this.updateNotice();
 			if (this.queue.length > 0) {
