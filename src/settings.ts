@@ -24,6 +24,8 @@ export interface PdfToMdSettings {
 	disableImageExtraction: boolean;
 	pageRange: string;
 	debug: boolean;
+	concurrency: number;
+	skipExisting: boolean;
 }
 
 export const DEFAULT_SETTINGS: PdfToMdSettings = {
@@ -40,6 +42,8 @@ export const DEFAULT_SETTINGS: PdfToMdSettings = {
 	disableImageExtraction: false,
 	pageRange: "",
 	debug: false,
+	concurrency: 3,
+	skipExisting: true,
 };
 
 export class PdfToMdSettingTab extends PluginSettingTab {
@@ -232,6 +236,41 @@ export class PdfToMdSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.disableImageExtraction)
 					.onChange(async (value) => {
 						this.plugin.settings.disableImageExtraction = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("h3", { text: "Batch conversion" });
+
+		new Setting(containerEl)
+			.setName("Parallel conversions")
+			.setDesc(
+				"How many PDFs to convert simultaneously when batch-converting a folder."
+			)
+			.addDropdown((dd) =>
+				dd
+					.addOption("1", "1")
+					.addOption("2", "2")
+					.addOption("3", "3")
+					.addOption("5", "5")
+					.addOption("10", "10")
+					.setValue(String(this.plugin.settings.concurrency))
+					.onChange(async (value) => {
+						this.plugin.settings.concurrency = Number(value);
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Skip already converted")
+			.setDesc(
+				"Skip PDFs that already have a .md file with the same name."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.skipExisting)
+					.onChange(async (value) => {
+						this.plugin.settings.skipExisting = value;
 						await this.plugin.saveSettings();
 					})
 			);

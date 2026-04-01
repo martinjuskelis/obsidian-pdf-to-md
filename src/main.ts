@@ -30,15 +30,34 @@ export default class PdfToMdPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "convert-folder-pdfs",
+			name: "Convert all PDFs in current folder",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				const folder = file?.parent;
+				if (!folder) return false;
+				if (!checking) this.convertFolder(folder);
+				return true;
+			},
+		});
+
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, abstractFile) => {
-				if (!(abstractFile instanceof TFile)) return;
-				if (abstractFile.extension !== "pdf") return;
-				menu.addItem((item) => {
-					item.setTitle("Convert to Markdown")
-						.setIcon("file-text")
-						.onClick(() => this.convertPdf(abstractFile));
-				});
+				if (abstractFile instanceof TFile && abstractFile.extension === "pdf") {
+					menu.addItem((item) => {
+						item.setTitle("Convert to Markdown")
+							.setIcon("file-text")
+							.onClick(() => this.convertPdf(abstractFile));
+					});
+				}
+				if (abstractFile instanceof TFolder) {
+					menu.addItem((item) => {
+						item.setTitle("Convert all PDFs to Markdown")
+							.setIcon("files")
+							.onClick(() => this.convertFolder(abstractFile));
+					});
+				}
 			})
 		);
 
@@ -59,65 +78,129 @@ export default class PdfToMdPlugin extends Plugin {
 
 	// ------- Conversion -------
 
-	private converting = false;
+	private activeJobs = 0;
+
+	private async convertOne(file: TFile): Promise<boolean> {
+		const signal = { cancelled: false };
+		const pdfBuffer = await this.app.vault.readBinary(file);
+
+		let result: ConversionResult;
+		if (this.settings.provider === "replicate") {
+			result = await convertWithReplicate(
+				pdfBuffer,
+				this.settings,
+				() => {},
+				signal
+			);
+		} else {
+			result = await convertWithModal(
+				pdfBuffer,
+				this.settings,
+				() => {}
+			);
+		}
+
+		await this.saveResult(file, result);
+		return true;
+	}
 
 	private async convertPdf(file: TFile) {
-		if (this.converting) {
+		if (this.activeJobs > 0) {
 			new Notice("A conversion is already in progress.");
 			return;
 		}
-		this.converting = true;
-
-		const progressNotice = new Notice("Starting PDF conversion...", 0);
-		const signal = { cancelled: false };
-
-		const onProgress = (msg: string) => {
-			progressNotice.setMessage(msg);
-		};
+		this.activeJobs = 1;
+		const notice = new Notice(`Converting ${file.name}...`, 0);
 
 		try {
-			// Read PDF binary
-			onProgress("Reading PDF...");
-			const pdfBuffer = await this.app.vault.readBinary(file);
-
-			// Call provider
-			let result: ConversionResult;
-			if (this.settings.provider === "replicate") {
-				result = await convertWithReplicate(
-					pdfBuffer,
-					this.settings,
-					onProgress,
-					signal
-				);
-			} else {
-				result = await convertWithModal(
-					pdfBuffer,
-					this.settings,
-					onProgress
-				);
-			}
-
-			// Save result
-			onProgress("Saving files...");
-			await this.saveResult(file, result);
-
-			progressNotice.hide();
-			const elapsed = result.elapsedSeconds
-				? ` (${result.elapsedSeconds}s)`
-				: "";
-			new Notice(
-				`Converted ${file.name} to Markdown.${elapsed}`,
-				5000
-			);
+			await this.convertOne(file);
+			notice.hide();
+			new Notice(`Converted ${file.name} to Markdown.`, 5000);
 		} catch (err) {
-			progressNotice.hide();
-			const msg =
-				err instanceof Error ? err.message : String(err);
-			new Notice(`PDF conversion failed: ${msg}`, 8000);
+			notice.hide();
+			const msg = err instanceof Error ? err.message : String(err);
+			new Notice(`Failed: ${msg}`, 8000);
 			console.error("pdf-to-md: conversion error", err);
 		} finally {
-			this.converting = false;
+			this.activeJobs = 0;
 		}
+	}
+
+	private async convertFolder(folder: TFolder) {
+		if (this.activeJobs > 0) {
+			new Notice("A conversion is already in progress.");
+			return;
+		}
+
+		// Collect PDFs in this folder (non-recursive)
+		let pdfs = folder.children.filter(
+			(f): f is TFile => f instanceof TFile && f.extension === "pdf"
+		);
+
+		if (this.settings.skipExisting) {
+			pdfs = pdfs.filter((f) => {
+				const mdPath = joinPath(
+					f.parent?.path ?? "",
+					`${f.basename}.md`
+				);
+				return !this.app.vault.getAbstractFileByPath(mdPath);
+			});
+		}
+
+		if (pdfs.length === 0) {
+			new Notice("No PDFs to convert in this folder.");
+			return;
+		}
+
+		const total = pdfs.length;
+		let completed = 0;
+		let failed = 0;
+		const concurrency = this.settings.concurrency;
+		const notice = new Notice(
+			`Converting 0/${total} PDFs (${concurrency} parallel)...`,
+			0
+		);
+
+		this.activeJobs = total;
+
+		const update = () => {
+			notice.setMessage(
+				`Converting PDFs: ${completed}/${total} done` +
+					(failed > 0 ? `, ${failed} failed` : "") +
+					` (${concurrency} parallel)`
+			);
+		};
+
+		// Process with concurrency limit
+		const queue = [...pdfs];
+		const workers = Array.from(
+			{ length: Math.min(concurrency, queue.length) },
+			async () => {
+				while (queue.length > 0) {
+					const file = queue.shift()!;
+					try {
+						await this.convertOne(file);
+						completed++;
+					} catch (err) {
+						failed++;
+						console.error(
+							`pdf-to-md: failed to convert ${file.path}`,
+							err
+						);
+					}
+					update();
+				}
+			}
+		);
+
+		await Promise.all(workers);
+		this.activeJobs = 0;
+		notice.hide();
+		new Notice(
+			`Batch complete: ${completed}/${total} converted` +
+				(failed > 0 ? `, ${failed} failed` : ""),
+			8000
+		);
 	}
 
 	// ------- File saving -------
