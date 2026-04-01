@@ -252,9 +252,11 @@ export default class PdfToMdPlugin extends Plugin {
 		const parentPath = pdfFile.parent?.path ?? "";
 		const baseName = pdfFile.basename; // filename without extension
 
-		// Save images (if any)
+		// Save images (if any, and if not disabled)
 		let markdown = result.markdown;
-		const imageNames = Object.keys(result.images);
+		const imageNames = this.settings.disableImageExtraction
+			? []
+			: Object.keys(result.images);
 
 		if (imageNames.length > 0) {
 			const imageDir = joinPath(parentPath, `${baseName}-images`);
